@@ -1,0 +1,257 @@
+# Seed catalog for the Ryan-MCP proof of concept. ALL CONTENT IS SYNTHETIC.
+#
+# Each rule is defined once, here: `rule.text` is the hand-written description, `rule.expression` is what
+# app/rules.py executes. The fact dictionary types every fact a rule may use, so bad input is rejected before
+# evaluation instead of producing a misleading true/false.
+
+facts:
+  coverage_start_date: {type: date}
+  coverage_end_date: {type: date, nullable: true, not_before: coverage_start_date}  # null = open-ended coverage
+  registration_date: {type: date}
+  claim_count_to_date: {type: integer}
+  reporting_month_start: {type: date}
+  reporting_month_end: {type: date, not_before: reporting_month_start}
+  eligibility_status: {type: string}
+  network_status: {type: string}
+  follow_up_eligible: {type: boolean}
+  risk_flag: {type: string}
+
+concepts:
+  # --- The five approved meanings of "member" -------------------------------------------------------------------
+
+  - id: registered_member
+    term: member
+    name: Registered member
+    context: {system: crm, domain: marketing}
+    definition: Person who registered or expressed interest
+    aliases: [registrant]
+    authoritative_source: {system: crm, dataset: registrations}
+    source_systems: [crm]
+    rule:
+      text: "registration_date <= requested_date"
+      expression: {fact: registration_date, op: lte, value: {ref: requested_date}}
+    relationships:
+      - {type: alternative_meaning_of, target: member, description: CRM meaning of member}
+    owner: crm_data_stewardship
+    version: 1.0.0
+    status: approved
+    effective_from: 2024-01-01
+    effective_to: null
+    superseded_by: null
+    allowed_roles: [analyst, care_manager, steward]
+
+  - id: active_member
+    term: member
+    name: Active member
+    context: {system: enrollment, domain: eligibility}
+    definition: Person with coverage effective on the requested date
+    aliases: [enrolled member]
+    authoritative_source: {system: eligibility_enrollment_platform, dataset: coverage_spans}
+    source_systems: [eligibility_enrollment_platform, crm, claims_system]
+    rule:
+      text: "coverage_start_date <= requested_date AND (coverage_end_date IS NULL OR coverage_end_date >= requested_date)"
+      expression:
+        all:
+          - {fact: coverage_start_date, op: lte, value: {ref: requested_date}}
+          - any:
+              - {fact: coverage_end_date, op: is_null}
+              - {fact: coverage_end_date, op: gte, value: {ref: requested_date}}
+    relationships:
+      - {type: alternative_meaning_of, target: member, description: Enrollment meaning of member}
+    owner: enrollment_data_stewardship
+    version: 1.0.0
+    status: approved
+    effective_from: 2024-01-01
+    effective_to: null
+    superseded_by: null
+    allowed_roles: [analyst, care_manager, steward]
+
+  - id: claimant_member
+    term: member
+    name: Claimant member
+    context: {system: claims, domain: claims}
+    definition: Person with at least one claim to date
+    aliases: [claimant]
+    authoritative_source: {system: claims_system, dataset: adjudicated_claims}
+    source_systems: [claims_system]
+    rule:
+      text: "claim_count_to_date >= 1"
+      expression: {fact: claim_count_to_date, op: gte, value: 1}
+    relationships:
+      - {type: alternative_meaning_of, target: member, description: Claims meaning of member}
+    owner: claims_data_stewardship
+    version: 1.0.0
+    status: approved
+    effective_from: 2024-01-01
+    effective_to: null
+    superseded_by: null
+    allowed_roles: [analyst, care_manager, steward]
+
+  # Two effective-dated versions: v1 counted people enrolled on the first day of the month; v2 counts anyone
+  # enrolled for any portion of it. `as_of` / `requested_date` selects the version.
+  - id: reporting_month_member
+    term: member
+    name: Reporting month member
+    context: {system: analytics, domain: reporting}
+    definition: Person enrolled on the first day of a reporting month
+    aliases: [monthly member]
+    authoritative_source: {system: analytics_warehouse, dataset: monthly_enrollment_snapshot}
+    source_systems: [analytics_warehouse, eligibility_enrollment_platform]
+    rule:
+      text: "coverage_start_date <= reporting_month_start AND (coverage_end_date IS NULL OR coverage_end_date >= reporting_month_start)"
+      expression:
+        all:
+          - {fact: coverage_start_date, op: lte, value: {fact: reporting_month_start}}
+          - any:
+              - {fact: coverage_end_date, op: is_null}
+              - {fact: coverage_end_date, op: gte, value: {fact: reporting_month_start}}
+    relationships:
+      - {type: alternative_meaning_of, target: member, description: Analytics meaning of member}
+    owner: analytics_data_stewardship
+    version: 1.0.0
+    status: approved
+    effective_from: 2024-01-01
+    effective_to: 2025-12-31
+    superseded_by: null
+    allowed_roles: [analyst, care_manager, steward]
+
+  - id: reporting_month_member
+    term: member
+    name: Reporting month member
+    context: {system: analytics, domain: reporting}
+    definition: Person enrolled for any portion of a reporting month
+    aliases: [monthly member]
+    authoritative_source: {system: analytics_warehouse, dataset: monthly_enrollment_snapshot}
+    source_systems: [analytics_warehouse, eligibility_enrollment_platform]
+    rule:
+      text: "coverage_start_date <= reporting_month_end AND (coverage_end_date IS NULL OR coverage_end_date >= reporting_month_start)"
+      expression:
+        all:
+          - {fact: coverage_start_date, op: lte, value: {fact: reporting_month_end}}
+          - any:
+              - {fact: coverage_end_date, op: is_null}
+              - {fact: coverage_end_date, op: gte, value: {fact: reporting_month_start}}
+    relationships:
+      - {type: alternative_meaning_of, target: member, description: Analytics meaning of member}
+    owner: analytics_data_stewardship
+    version: 2.0.0
+    status: approved
+    effective_from: 2026-01-01
+    effective_to: null
+    superseded_by: null
+    allowed_roles: [analyst, care_manager, steward]
+
+  - id: currently_eligible_member
+    term: member
+    name: Currently eligible member
+    context: {system: customer_service, domain: member_services}
+    # Uses a status snapshot supplied by the caller; it does not look at requested_date (see PROGRESS.md).
+    definition: Person eligible today
+    aliases: [eligible member]
+    authoritative_source: {system: customer_service_platform, dataset: eligibility_status}
+    source_systems: [customer_service_platform, eligibility_enrollment_platform]
+    rule:
+      text: "eligibility_status == 'eligible'"
+      expression: {fact: eligibility_status, op: eq, value: eligible}
+    relationships:
+      - {type: alternative_meaning_of, target: member, description: Customer service meaning of member}
+    owner: member_services_data_stewardship
+    version: 1.0.0
+    status: approved
+    effective_from: 2024-01-01
+    effective_to: null
+    superseded_by: null
+    allowed_roles: [analyst, care_manager, steward]
+
+  # --- Concepts that depend on active_member ----------------------------------------------------------------------
+
+  - id: member_in_network
+    term: member in network
+    name: Member in network
+    context: {system: network, domain: provider_network}
+    definition: Member whose provider network status is in-network on the requested date
+    aliases: [in-network member]
+    authoritative_source: {system: provider_network_directory, dataset: network_status}
+    source_systems: [provider_network_directory, eligibility_enrollment_platform, care_management_system]
+    rule:
+      text: "network_status == 'in_network' AND active_member == TRUE"
+      expression:
+        all:
+          - {fact: network_status, op: eq, value: in_network}
+          - {concept: active_member}
+    relationships:
+      - {type: depends_on, target: active_member, description: Must be an active member on the requested date}
+    owner: network_data_stewardship
+    version: 1.0.0
+    status: approved
+    effective_from: 2024-01-01
+    effective_to: null
+    superseded_by: null
+    allowed_roles: [analyst, care_manager, steward]
+
+  - id: eligible_for_follow_up
+    term: eligible for follow up
+    name: Eligible for follow up
+    context: {system: care_management, domain: outreach}
+    definition: Active member eligible for outreach based on plan status and care gap follow-up rules
+    aliases: [outreach eligible]
+    authoritative_source: {system: care_management_system, dataset: care_gap_follow_up}
+    source_systems: [care_management_system, eligibility_enrollment_platform, population_health_platform]
+    rule:
+      text: "active_member == TRUE AND follow_up_eligible == TRUE AND risk_flag != 'high'"
+      expression:
+        all:
+          - {concept: active_member}
+          - {fact: follow_up_eligible, op: eq, value: true}
+          - {fact: risk_flag, op: ne, value: high}
+    relationships:
+      - {type: depends_on, target: active_member, description: Must be an active member on the requested date}
+    owner: care_management_data_stewardship
+    version: 1.0.0
+    status: approved
+    effective_from: 2024-01-01
+    effective_to: null
+    superseded_by: null
+    allowed_roles: [care_manager, steward]  # restricted: analysts see that it exists, not what it says
+
+  # --- Governance demos -------------------------------------------------------------------------------------------
+
+  # Deprecated: the legacy enrollment meaning ignored termination dates. Still resolvable, with a warning.
+  - id: covered_life
+    term: covered life
+    name: Covered life
+    context: {system: enrollment, domain: eligibility}
+    definition: Person whose coverage has started, regardless of termination (legacy)
+    aliases: [covered lives]
+    authoritative_source: {system: eligibility_enrollment_platform, dataset: coverage_spans}
+    source_systems: [eligibility_enrollment_platform]
+    rule:
+      text: "coverage_start_date <= requested_date"
+      expression: {fact: coverage_start_date, op: lte, value: {ref: requested_date}}
+    relationships: []
+    owner: enrollment_data_stewardship
+    version: 1.0.0
+    status: deprecated
+    effective_from: 2022-01-01
+    effective_to: null
+    superseded_by: active_member
+    allowed_roles: [analyst, care_manager, steward]
+
+  # Draft: proposed, not approved. Uses the term "member" on purpose, to prove drafts never become a candidate.
+  - id: engaged_member
+    term: member
+    name: Engaged member
+    context: {system: care_management, domain: outreach}
+    definition: Person with a care management interaction in the last 12 months (proposed)
+    aliases: []
+    authoritative_source: null
+    source_systems: [care_management_system]
+    rule: null
+    relationships: []
+    owner: care_management_data_stewardship
+    version: 0.1.0
+    status: draft
+    effective_from: 2026-01-01
+    effective_to: null
+    superseded_by: null
+    allowed_roles: [analyst, care_manager, steward]

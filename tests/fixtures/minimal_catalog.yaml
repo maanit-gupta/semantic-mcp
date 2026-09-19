@@ -1,0 +1,91 @@
+# Smallest valid catalog that exercises every validation rule's passing path: two adjacent effective-dated
+# versions, a depends_on backed by a {concept:} ref, a deprecated concept with superseded_by, a draft without a
+# rule, and a relationship that targets a term. Tests copy it and break exactly one thing.
+
+facts:
+  start: {type: date}
+  end: {type: date, nullable: true, not_before: start}
+  status: {type: string}
+  count: {type: integer}
+  flag: {type: boolean}
+
+concepts:
+  - id: base
+    term: thing
+    name: Base thing
+    context: {system: enrollment, domain: test}
+    definition: Base v1
+    authoritative_source: {system: sys, dataset: ds}
+    rule:
+      text: "start <= requested_date"
+      expression: {fact: start, op: lte, value: {ref: requested_date}}
+    owner: team_a
+    version: 1.0.0
+    status: approved
+    effective_from: 2024-01-01
+    effective_to: 2024-12-31
+    allowed_roles: [analyst, care_manager, steward]
+
+  - id: base
+    term: thing
+    name: Base thing
+    context: {system: enrollment, domain: test}
+    definition: Base v2
+    authoritative_source: {system: sys, dataset: ds}
+    rule:
+      text: "start <= requested_date AND (end IS NULL OR end >= requested_date)"
+      expression:
+        all:
+          - {fact: start, op: lte, value: {ref: requested_date}}
+          - any:
+              - {fact: end, op: is_null}
+              - {fact: end, op: gte, value: {ref: requested_date}}
+    owner: team_a
+    version: 2.0.0
+    status: approved
+    effective_from: 2025-01-01
+    allowed_roles: [analyst, care_manager, steward]
+
+  - id: derived
+    term: derived thing
+    name: Derived thing
+    context: {system: network, domain: test}
+    definition: Derived
+    authoritative_source: {system: sys, dataset: ds}
+    rule:
+      text: "base == TRUE AND status == 'ok'"
+      expression:
+        all:
+          - {concept: base}
+          - {fact: status, op: eq, value: ok}
+    relationships:
+      - {type: depends_on, target: base, description: needs base}
+      - {type: alternative_meaning_of, target: thing, description: targets a term}
+    owner: team_b
+    version: 1.0.0
+    status: approved
+    effective_from: 2024-01-01
+    allowed_roles: [care_manager]
+
+  - id: legacy
+    term: legacy thing
+    name: Legacy thing
+    context: {system: crm, domain: test}
+    definition: Legacy
+    owner: team_a
+    version: 1.0.0
+    status: deprecated
+    effective_from: 2020-01-01
+    superseded_by: base
+    allowed_roles: [analyst]
+
+  - id: idea
+    term: thing
+    name: Idea
+    context: {system: crm, domain: test}
+    definition: Draft without a rule
+    owner: team_c
+    version: 0.1.0
+    status: draft
+    effective_from: 2024-01-01
+    allowed_roles: [analyst]

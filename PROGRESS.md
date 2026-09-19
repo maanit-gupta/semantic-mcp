@@ -8,7 +8,7 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
 | Milestone | Status | Tag |
 |---|---|---|
 | M0 Scaffold | done | `m0-done` |
-| M1 Models, catalog, validation | not started | |
+| M1 Models, catalog, validation | done | `m1-done` |
 | M2 Rule evaluator | not started | |
 | M3–M7 | not started (later prompts) | |
 
@@ -75,9 +75,27 @@ Only `is_null`/`not_null` observe null. Any other comparison with a null operand
 `InsufficientContext(missing_facts)`, `InvalidFacts(errors)`, `ConceptNotFound`, `ConceptNotEffective`.
 HTTP status mapping is M3's job.
 
-## Deviations from the brief
+### D10. Overlap check covers all non-draft versions (M1)
+Brief §4a asks that no two *approved* versions of one id overlap. The check is applied to approved **and** deprecated
+versions, because either can be selected by date; two overlapping candidates would force a silent choice.
+Drafts may overlap (a draft v3 can be prepared while v2 is live).
+- Rejected: approved-only (a deprecated v1 overlapping an approved v2 would make `effective()` order-dependent).
+
+### D11. Structural vs cross-object validation split (M1)
+`app/models.py` checks shapes only (Pydantic, `extra="forbid"`); every check needing more than one object
+(references, overlaps, cycles, expression-vs-fact-dictionary types, `not_before`) lives in `app/catalog.py`, so a
+single bad concept never stops the other checks from running. Expression node type is chosen by a callable
+discriminator on the node's key, so errors name the node kind instead of listing every union member.
+Type rules enforced at load: ordering ops only on date/integer; `in` only on string/integer with a literal list;
+boolean facts only `eq`/`ne`; `is_null`/`not_null` only on nullable facts (otherwise the test is constant);
+`{ref: requested_date}` only against date facts; `{fact:}` operands must have the same type.
+
+### D12. `load_catalog` uses `yaml.safe_load`
+No Python objects can be constructed from YAML tags (tested with a `!!python/object/apply` payload).
+
 - D1 fact dictionary and D2 `{fact:}` operand (both approved at DP1).
 - D6 extra validation rule (approved at DP1).
+- D10: overlap check also covers deprecated versions (stricter than §4a).
 - M0 creates only the directories it uses (`app/`, `tests/`); the other directories in §4 are created by the milestone
   that fills them, rather than as empty placeholders.
 
@@ -89,5 +107,15 @@ HTTP status mapping is M3's job.
 - If a `{concept:}` dependency has no effective version on `requested_date`, the evaluator raises
   `ConceptNotEffective`; M3 decides its status code.
 
+## Mutation checks run so far
+| Milestone | Mutation | Killed by |
+|---|---|---|
+| M1 | `effective_from > effective_to` → `>=` | `test_effective_from_equal_to_effective_to_is_valid` |
+| M1 | overlap `>=` → `>` | `test_approved_versions_must_not_overlap` |
+| M1 | report only the first Pydantic error per concept | survived at first → added `test_every_schema_error_within_one_concept_is_reported`, now killed |
+
 ## Developer must be able to explain
-(filled in as milestones land)
+- Why validation is split between `models.py` (shape) and `catalog.py` (cross-object), and how one pass collects all
+  issues (`app/catalog.py` `parse_catalog`).
+- Why `raw_ids` / `raw_fact_names` exist: they stop one schema error cascading into false "unknown target" errors.
+- How the callable discriminator picks an expression node type (`app/models.py` `_expr_tag`).
