@@ -381,6 +381,12 @@ ERROR_CASES = [
     ("GET", "/semantic/nope", A, None),
     ("GET", "/nope", A, None),
     ("POST", "/health", {}, None),
+    ("POST", "/semantic/resolve", {}, {"term": "member"}),
+    ("POST", "/semantic/resolve", A, {}),
+    ("POST", "/semantic/resolve", A, {"term": "   "}),
+    ("POST", "/semantic/resolve", A, {"term": "member", "as_of": "2026-02-30"}),
+    ("POST", "/semantic/resolve", A, {"term": "member", "context": "enrollment"}),
+    ("GET", "/semantic/resolve", A, None),
 ]
 
 
@@ -396,6 +402,207 @@ def test_every_error_is_non_200_with_envelope(client, method, path, hdrs, body):
 
 
 def test_no_write_routes_exist(client):
-    # Read-only service: the only non-GET route is POST evaluate (it computes, it does not store).
+    # Read-only service: the only non-GET routes are POST resolve and evaluate, which compute and store nothing.
     routes = {(m, r.path) for r in client.app.routes for m in getattr(r, "methods", set()) if m not in ("GET", "HEAD")}
-    assert routes == {("POST", "/semantic/concepts/{concept_id}/evaluate")}
+    assert routes == {("POST", "/semantic/concepts/{concept_id}/evaluate"), ("POST", "/semantic/resolve")}
+
+
+# --- POST /semantic/resolve -------------------------------------------------------------------------------------
+
+
+def resolve(client, body, hdrs=A):
+    return client.post("/semantic/resolve", json=body, headers=hdrs)
+
+
+def test_resolve_ambiguous_response_shape(client):
+    response = resolve(client, {"term": "member", "as_of": "2026-09-19"})
+    assert response.status_code == 200
+    body = response.json()
+    assert list(body) == ["status", "term", "as_of", "concept", "candidates", "clarifying_question", "suggestions",
+                          "restricted_count", "warnings"]
+    assert (body["status"], body["term"], body["as_of"], body["concept"], body["suggestions"], body["restricted_count"],
+            body["warnings"]) == ("ambiguous", "member", "2026-09-19", None, [], 0, [])
+    assert [c["id"] for c in body["candidates"]] == [
+        "reporting_month_member", "claimant_member", "registered_member", "currently_eligible_member", "active_member"
+    ]
+    assert body["candidates"][4] == {
+        "id": "active_member", "name": "Active member", "term": "member",
+        "context": {"system": "enrollment", "domain": "eligibility"},
+        "definition": "Person with coverage effective on the requested date", "version": "1.0.0", "status": "approved",
+    }
+    assert body["clarifying_question"] == (
+        "Which meaning of 'member' do you need: analytics, claims, crm, customer_service or enrollment?"
+    )
+
+
+def test_resolve_resolved_carries_full_definition(client):
+    body = resolve(client, {"term": "member", "context": {"system": "enrollment"}, "as_of": "2026-09-19"}).json()
+    full = client.get("/semantic/concepts/active_member?as_of=2026-09-19", headers=A).json()
+    assert (body["status"], body["candidates"], body["clarifying_question"]) == ("resolved", [], None)
+    assert body["concept"] == {k: v for k, v in full.items() if k != "as_of"}
+
+
+def test_resolve_defaults_as_of_to_utc_today(client):
+    assert resolve(client, {"term": "member"}).json()["as_of"] == today_utc().isoformat()
+
+
+@pytest.mark.parametrize(
+    ("body", "hdrs", "status", "concept", "restricted_count"),
+    [
+        ({"term": "member", "context": {"system": "crm"}}, A, "resolved", "registered_member", 0),
+        ({"term": "member", "context": {"system": "customer_service"}}, A, "resolved", "currently_eligible_member", 0),
+        ({"term": "Active  Member"}, A, "resolved", "active_member", 0),
+        ({"term": "eligible for follow up"}, A, "restricted", None, 1),
+        ({"term": "eligible for follow up"}, CM, "resolved", "eligible_for_follow_up", 0),
+        ({"term": "covered life"}, A, "resolved", "covered_life", 0),
+        ({"term": "engaged member"}, A, "not_found", None, 0),
+        ({"term": "member", "context": None}, A, "ambiguous", None, 0),
+        ({"term": "member", "context": {"system": None}}, A, "ambiguous", None, 0),
+        ({"term": "member", "as_of": None}, A, "ambiguous", None, 0),
+    ],
+)
+def test_resolve_outcomes(client, body, hdrs, status, concept, restricted_count):
+    result = resolve(client, body, hdrs).json()
+    assert (result["status"], (result["concept"] or {}).get("id"), result["restricted_count"]) == (status, concept, restricted_count)
+
+
+@pytest.mark.parametrize(("as_of", "version"), [("2025-12-31", "1.0.0"), ("2026-01-01", "2.0.0")])
+def test_resolve_version_by_as_of(client, as_of, version):
+    body = resolve(client, {"term": "reporting month member", "as_of": as_of}).json()
+    assert (body["status"], body["concept"]["version"]) == ("resolved", version)
+
+
+def test_resolve_not_found_with_suggestion(client):
+    body = resolve(client, {"term": "membr"}).json()
+    assert (body["status"], body["suggestions"], body["candidates"]) == ("not_found", ["member"], [])
+
+
+@pytest.mark.parametrize(("body", "outcome"), [
+    ({"term": "member", "context": {"system": "enrollment"}}, "ok"),
+    ({"term": "member"}, "ambiguous"),
+    ({"term": "membr"}, "not_found"),
+    ({"term": "eligible for follow up"}, "denied"),
+])
+def test_resolve_audit_outcome(client, audit_path, body, outcome):
+    import json
+
+    resolve(client, body)
+    (entry,) = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
+    assert (entry["endpoint"], entry["status_code"], entry["outcome"], entry["params"]["term"]) == (
+        "/semantic/resolve", 200, outcome, body["term"]
+    )
+
+
+RESTRICTED_STRINGS = [
+    "eligible_for_follow_up", "Eligible for follow up", "outreach eligible",
+    "Active member eligible for outreach based on plan status and care gap follow-up rules", "care_gap_follow_up",
+]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"term": "member"}, {"term": "membr"}, {"term": "eligible"}, {"term": "outreach"}, {"term": "follow up"},
+        {"term": "outreach eligble"}, {"term": "member", "context": {"system": "care_management"}},
+        {"term": "member", "context": {"domain": "outreach"}}, {"term": "active member", "context": {"system": "care_management"}},
+    ],
+)
+def test_analyst_resolve_never_leaks_restricted_content(client, body):
+    text = resolve(client, body).text
+    for secret in RESTRICTED_STRINGS:
+        assert secret not in text
+
+
+def test_analyst_restricted_resolution_has_count_only(client):
+    body = resolve(client, {"term": "eligible for follow up"}).json()
+    assert body == {
+        "status": "restricted", "term": "eligible for follow up", "as_of": today_utc().isoformat(), "concept": None,
+        "candidates": [], "clarifying_question": None, "suggestions": [], "restricted_count": 1,
+        "warnings": ["1 meaning(s) of 'eligible for follow up' exist that your role cannot access"],
+    }
+    assert "Active member eligible for outreach" not in str(body)
+
+
+# --- Hostile inputs: never a 5xx --------------------------------------------------------------------------------
+
+HOSTILE_RESOLVE = [
+    # (raw body or json, content-type, expected status)
+    ({}, None, 422),
+    ({"term": ""}, None, 422),
+    ({"term": "   "}, None, 422),
+    ({"term": "_-_"}, None, 422),
+    ({"term": "m" * 201}, None, 422),
+    ({"term": "m" * 200}, None, 200),
+    ({"term": "m" * 1_000_000}, None, 422),
+    ({"term": None}, None, 422),
+    ({"term": 5}, None, 422),
+    ({"term": True}, None, 422),
+    ({"term": ["member"]}, None, 422),
+    ({"term": {"$ne": ""}}, None, 422),
+    ({"term": "membre ü 名前 🙂"}, None, 200),
+    ({"term": "ＭＥＭＢＥＲ"}, None, 200),
+    ({"term": "member\u0000"}, None, 200),
+    ({"term": "member", "context": "enrollment"}, None, 422),
+    ({"term": "member", "context": []}, None, 422),
+    ({"term": "member", "context": {"system": 5}}, None, 422),
+    ({"term": "member", "context": {"system": ""}}, None, 422),
+    ({"term": "member", "context": {"system": "   "}}, None, 422),
+    ({"term": "member", "context": {"system": "x" * 65}}, None, 422),
+    ({"term": "member", "context": {"system": {"$gt": ""}}}, None, 422),
+    ({"term": "member", "context": {"foo": 1}}, None, 422),
+    ({"term": "member", "context": {"system": "enrollment", "role": "steward"}}, None, 422),
+    ({"term": "member", "as_of": "2026-02-30"}, None, 422),
+    ({"term": "member", "as_of": 20260101}, None, 422),
+    ({"term": "member", "as_of": "2026-01-01T00:00:00Z"}, None, 422),
+    ({"term": "member", "as_of": "0000-01-01"}, None, 422),
+    ({"term": "member", "as_of": "9999-12-31"}, None, 200),
+    ({"term": "member", "role": "steward"}, None, 422),
+    ([], None, 422),
+    ("member", None, 422),
+    (None, None, 422),
+    (b"", "application/json", 422),
+    (b"{not json", "application/json", 422),
+    (b'{"term": "\ud800"}', "application/json", 422),  # lone surrogate: Pydantic rejects it
+    (b'{"term": "a\ud83d\ude42"}', "application/json", 200),  # valid pair: rendered as ASCII escapes
+    (b'{"term": "member"}', "text/plain", 422),
+    (b'{"term": "member", "term": 5}', "application/json", 422),
+    (b"\xff\xfe\x00", "application/json", 400),  # not UTF-8: FastAPI's parse error, enveloped
+    (b'{"term": ' + b"[" * 100_000 + b"]" * 100_000 + b"}", "application/json", 400),
+]
+
+
+@pytest.mark.parametrize(("body", "content_type", "expected"), HOSTILE_RESOLVE)
+def test_hostile_resolve_inputs_never_5xx(client, body, content_type, expected):
+    if isinstance(body, bytes):
+        response = client.post("/semantic/resolve", content=body, headers={**A, "Content-Type": content_type})
+    else:
+        response = client.post("/semantic/resolve", json=body, headers=A)
+    assert response.status_code == expected
+    if expected != 200:
+        assert sorted(response.json()["error"]) == ["code", "details", "message"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/semantic/concepts?term=%00", "/semantic/concepts?term=%F0%9F%99%82", "/semantic/concepts?system=%0A%0D",
+        "/semantic/concepts/%00", "/semantic/concepts/..%2F..%2Fetc%2Fpasswd", "/semantic/concepts/%F0%9F%99%82",
+        "/semantic/concepts/active_member?as_of=%00", "/semantic/concepts/active_member?as_of=2026-01-01&as_of=x",
+        "/semantic/concepts/active_member/relationships?as_of=99999-01-01", "/semantic/audit?limit=99999999999999999999",
+    ],
+)
+def test_hostile_query_and_path_inputs_never_5xx(client, path):
+    response = client.get(path, headers=headers("steward"))
+    assert response.status_code < 500
+    assert response.status_code == 200 or sorted(response.json()["error"]) == ["code", "details", "message"]
+
+
+def test_hostile_evaluate_inputs_never_5xx(client):
+    bodies = [
+        {"requested_date": "2026-01-01", "facts": {"coverage_start_date": {"$gt": ""}, "coverage_end_date": [None]}},
+        {"requested_date": "2026-01-01", "facts": {"coverage_start_date": "9999-12-31", "coverage_end_date": "0001-01-01"}},
+        {"requested_date": "2026-01-01", "facts": {"coverage_start_date": 1e308, "coverage_end_date": -0.0}},
+        {"requested_date": "2026-01-01", "facts": {"": 1, "\u0000": 2}},
+    ]
+    statuses = [evaluate(client, "active_member", b).status_code for b in bodies]
+    assert statuses == [422, 422, 422, 422]

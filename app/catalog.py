@@ -28,6 +28,7 @@ from .models import (
     FactSpec,
     RefOperand,
     concept_refs,
+    normalize_term,
     walk,
 )
 
@@ -72,11 +73,6 @@ class Catalog:
             if concept.status != "draft" and _covers(concept, on):
                 return concept
         return None
-
-
-def normalize_term(text: str) -> str:
-    """Case-insensitive, `_`/`-` read as spaces, whitespace collapsed: "Active__Member " == "active member"."""
-    return " ".join(text.casefold().replace("_", " ").replace("-", " ").split())
 
 
 def term_keys(concept: Concept) -> set[str]:

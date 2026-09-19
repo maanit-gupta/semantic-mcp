@@ -16,9 +16,10 @@ from fastapi import Path as PathParam
 from . import rules
 from .audit import AuditLog, clip, outcome_for_status
 from .auth import API_KEY_HEADER, Caller, is_visible, load_keys
-from .catalog import Catalog, load_catalog, normalize_term, term_keys
+from .catalog import Catalog, load_catalog, term_keys
 from .errors import ApiError, AsciiJSONResponse, error_response, install_error_handlers
-from .models import Concept, EvaluateRequest, IsoDate
+from .models import Concept, EvaluateRequest, IsoDate, ResolveRequest, normalize_term
+from .resolver import resolve
 
 ROOT = Path(__file__).resolve().parent.parent  # paths are resolved from this file, not the working directory
 DEFAULT_CATALOG_PATH = ROOT / "catalog" / "concepts.yaml"
@@ -53,6 +54,17 @@ def concept_view(concept: Concept) -> dict[str, Any]:
     data["rule"] = concept.rule.model_dump(mode="json", by_alias=True, exclude_unset=True) if concept.rule else None
     data["warnings"] = deprecation_warnings(concept)
     return data
+
+
+def candidate_view(concept: Concept) -> dict[str, Any]:
+    return {
+        "id": concept.id, "name": concept.name, "term": concept.term, "context": concept.context.model_dump(),
+        "definition": concept.definition, "version": concept.version, "status": concept.status,
+    }
+
+
+# Resolve outcomes map onto the audit vocabulary; a restricted answer is a denial even though it is HTTP 200.
+RESOLVE_OUTCOMES = {"resolved": "ok", "ambiguous": "ambiguous", "not_found": "not_found", "restricted": "denied"}
 
 
 def create_app(
@@ -225,6 +237,26 @@ def create_app(
             "status": concept.status,
             "requested_date": on.isoformat(),
             "warnings": deprecation_warnings(concept),
+        }
+
+    @app.post("/semantic/resolve")
+    def resolve_term(request: Request, body: ResolveRequest) -> dict[str, Any]:
+        on = body.as_of or today_utc()
+        context = body.context.model_dump(exclude_none=True) if body.context else {}
+        request.state.audit_params = {"term": body.term, "context": context, "as_of": on.isoformat()}
+        result = resolve(catalog, body.term, on, request.state.caller, context.get("system"), context.get("domain"))
+        request.state.audit_outcome = RESOLVE_OUTCOMES[result.status]
+        # The four outcomes are answers, not errors (brief §6), so all are HTTP 200.
+        return {
+            "status": result.status,
+            "term": result.term,
+            "as_of": on.isoformat(),
+            "concept": concept_view(result.concept) if result.concept else None,
+            "candidates": [candidate_view(c) for c in result.candidates],
+            "clarifying_question": result.clarifying_question,
+            "suggestions": list(result.suggestions),
+            "restricted_count": result.restricted_count,
+            "warnings": list(result.warnings),
         }
 
     @app.get("/semantic/audit")

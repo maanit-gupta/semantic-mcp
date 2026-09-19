@@ -19,6 +19,7 @@ from pydantic import (
     StrictBool,
     StrictInt,
     StrictStr,
+    AfterValidator,
     Tag,
     WithJsonSchema,
     model_validator,
@@ -218,6 +219,11 @@ class Concept(_Strict):
     allowed_roles: list[Role] = Field(min_length=1)
 
 
+def normalize_term(text: str) -> str:
+    """Case-insensitive, `_`/`-` read as spaces, whitespace collapsed: "Active__Member " == "active member"."""
+    return " ".join(text.casefold().replace("_", " ").replace("-", " ").split())
+
+
 # --- Dates from callers ------------------------------------------------------------------------------------------
 
 # [0-9], not \d: \d also matches non-ASCII digits. fromisoformat alone would accept "20260101" on 3.11.
@@ -246,6 +252,26 @@ IsoDate = Annotated[date, PlainValidator(parse_iso_date), WithJsonSchema({"type"
 class _Request(BaseModel):
     # Unknown fields are a 422, so a body cannot smuggle in e.g. {"role": "steward"}.
     model_config = ConfigDict(extra="forbid")
+
+
+def _has_words(value: str) -> str:
+    # "   " or "__" would normalise to nothing and silently match nothing; reject it instead.
+    if not normalize_term(value):
+        raise ValueError("must contain at least one character other than spaces, '_' or '-'")
+    return value
+
+
+class ResolveContext(_Request):
+    # Free text on purpose: an unknown system such as "finance" must reach the resolver (context-matched-nothing
+    # warning), not be rejected as a 422.
+    system: Annotated[str, Field(min_length=1, max_length=64), AfterValidator(_has_words)] | None = None
+    domain: Annotated[str, Field(min_length=1, max_length=64), AfterValidator(_has_words)] | None = None
+
+
+class ResolveRequest(_Request):
+    term: Annotated[str, Field(min_length=1, max_length=200), AfterValidator(_has_words)]
+    context: ResolveContext | None = None
+    as_of: IsoDate | None = None  # None → today's UTC date
 
 
 class EvaluateRequest(_Request):
