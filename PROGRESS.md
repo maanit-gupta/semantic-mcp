@@ -14,7 +14,7 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
 | M4 Resolver + /resolve | done | `m4-done` |
 | M5 MCP server | done | `m5-done` |
 | M6 Tests, eval, demo | done | `m6-done` |
-| M7 Docs | not started | |
+| M7 Docs | done | `m7-done` |
 
 ## DP1 (approved 2026-09-19, developer's "go" with all four default answers)
 
@@ -314,6 +314,17 @@ one-line reason. Nothing in the API can reach the fixture (`test_no_write_routes
 - Rejected: a committed JSON population (the brief asks for a seeded generator; the generator is the reviewable
   artefact); evaluating through the API (the API must never take a population).
 
+### D28. Documentation verification (M7)
+Every bash command in README.md and docs/DEMO_SCRIPT.md was run on macOS; outputs in DEMO_SCRIPT are pasted from
+those runs (shortened where marked). PowerShell, Windows paths, MCP Inspector and Claude Desktop were not available
+and are marked *unverified*; the Claude Desktop launch shape (venv Python, `-m mcp_server.server`, `PYTHONPATH` set to
+the repository, a different working directory) was verified on macOS with the SDK's stdio client. docs/ASSUMPTIONS.md
+cites file:line and a test for each stated behaviour; a script checked that every cited test exists and every cited
+line holds the named code. Commands use `python -m ...` throughout (`python -m uvicorn`, `python -m scripts.demo_conflict`)
+because running a script by path does not put the repository on `sys.path` (checked: `ModuleNotFoundError: No module named 'app'`).
+The production-gap section is based on the MCP specification revision 2026-07-28 (Authorization; Security Best
+Practices), read on 2026-09-20.
+
 ## Deviations from the brief
 - D1 fact dictionary and D2 `{fact:}` operand (both approved at DP1).
 - D6 extra validation rule (approved at DP1).
@@ -322,6 +333,8 @@ one-line reason. Nothing in the API can reach the fixture (`test_no_write_routes
 - D20: `as_of` added to `GET /concepts/{id}/relationships`; `status` filter excludes `draft`.
 - D16: `/health` requests are audited too ("one line per request").
 - D24: `httpx2` instead of the brief's `httpx` (evidence in D24).
+- D27: the demo and eval are run as modules (`python -m scripts.demo_conflict`, `python -m evals.run`), so the brief's
+  `scripts/demo_conflict.py` path is invoked as `python -m scripts.demo_conflict`.
 - D25: MCP results keep the API's field names (`authoritative_source`, `rule.text`) instead of renaming them to the
   brief's `source`/`rule_text`; `evaluate_concept` already returns `source` and `rule_text` because the API does.
 - M0 creates only the directories it uses (`app/`, `tests/`); the other directories in §4 are created by the milestone

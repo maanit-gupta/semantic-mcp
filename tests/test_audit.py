@@ -74,11 +74,12 @@ def test_outcome_and_error_code_per_status(client, audit_path, method, path, bod
     assert (response.status_code, entry["status_code"], entry["error_code"], entry["outcome"]) == (status, status, error_code, outcome)
 
 
-def test_unhandled_exception_is_a_500_envelope_and_audited(client, audit_path, monkeypatch):
+def test_unhandled_exception_is_a_500_envelope_and_audited(client, audit_path, monkeypatch, caplog, capfd):
     def boom(*_args, **_kwargs):
         raise RuntimeError("secret internal detail")
 
     monkeypatch.setattr(rules, "evaluate", boom)
+    caplog.set_level(logging.DEBUG)
     body = {"requested_date": "2026-01-01", "facts": {}}
     response = client.post("/semantic/concepts/active_member/evaluate", json=body, headers=headers("analyst"))
     assert (response.status_code, response.json()) == (
@@ -87,6 +88,18 @@ def test_unhandled_exception_is_a_500_envelope_and_audited(client, audit_path, m
     assert "secret internal detail" not in response.text
     (entry,) = lines(audit_path)
     assert (entry["status_code"], entry["error_code"], entry["outcome"]) == (500, "internal_error", "error")
+    # The cause is not logged anywhere (documented limitation): not in log records, output, or the audit line.
+    assert "secret internal detail" not in "".join(r.getMessage() for r in caplog.records) + "".join(capfd.readouterr())
+    assert "secret internal detail" not in audit_path.read_text(encoding="utf-8")
+
+
+def test_rejected_request_is_audited_with_empty_params(client, audit_path):
+    # Validation fails before the route runs, and only routes fill in params (documented in ASSUMPTIONS.md).
+    client.post("/semantic/concepts/active_member/evaluate", json={"requested_date": "bad", "facts": {}}, headers=headers("analyst"))
+    (entry,) = lines(audit_path)
+    assert (entry["params"], entry["endpoint"], entry["error_code"], entry["role"]) == (
+        {}, "/semantic/concepts/{concept_id}/evaluate", "validation_error", "analyst"
+    )
 
 
 def test_evaluate_logs_fact_names_not_values(client, audit_path):

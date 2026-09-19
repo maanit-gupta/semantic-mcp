@@ -105,7 +105,7 @@ def test_header_name_is_case_insensitive(client):
     assert client.get("/semantic/concepts", headers={"x-api-key": KEYS["analyst"]}).status_code == 200
 
 
-@pytest.mark.parametrize("path", ["/health", "/openapi.json", "/docs"])
+@pytest.mark.parametrize("path", ["/health", "/openapi.json", "/docs", "/redoc"])
 def test_public_paths_need_no_key(client, path):
     assert client.get(path).status_code == 200
 
