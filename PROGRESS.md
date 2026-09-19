@@ -12,7 +12,9 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
 | M2 Rule evaluator | done | `m2-done` |
 | M3 API foundation | done | `m3-done` |
 | M4 Resolver + /resolve | done | `m4-done` |
-| M5–M7 | not started (later prompt) | |
+| M5 MCP server | done | `m5-done` |
+| M6 Tests, eval, demo | not started | |
+| M7 Docs | not started | |
 
 ## DP1 (approved 2026-09-19, developer's "go" with all four default answers)
 
@@ -57,7 +59,16 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
   compatibility folding: full-width `ＭＥＭＢＥＲ` does not match `member` (`not_found`, no suggestion).
 - **Resolve's four outcomes are HTTP 200** (brief §6), including `not_found` and `restricted`; they are answers.
   The audit line still records `not_found` / `denied` for them.
-- **Default `as_of` is the UTC date.** Near midnight UTC it can be a day ahead of or behind the caller's local date;
+- **MCP key forwarding**: over Streamable HTTP the MCP server forwards only the caller's own `X-API-Key` (exactly one;
+  none or several → nothing forwarded → 401); over stdio it uses `SEMANTIC_API_KEY`. It never falls back to its own key
+  on HTTP. Every MCP call is audited with `via: "mcp"`.
+- **`get_definition` is two API calls** (`GET /concepts/{id}` and `/relationships`), so it writes two audit lines.
+- **MCP HTTP is localhost-only by default**: the SDK's DNS-rebinding protection answers only localhost `Host` headers;
+  serving it remotely needs `transport_security` settings, which are not configured here.
+- **MCP server logs**: `httpx2` logs each API request line (method, URL, status) at INFO to the MCP server's stderr.
+  URLs carry concept ids and `as_of`, never keys (scanned in `test_keys_never_appear_in_mcp_server_output_or_results`).
+- **Default `as_of` is the UTC date.**
+ Near midnight UTC it can be a day ahead of or behind the caller's local date;
   pass `as_of` explicitly when it matters.
 
 ## Decisions
@@ -226,6 +237,59 @@ is the one needed.
 same rule applies to `context.system`/`context.domain` (1–64 chars). They are free text: an unknown system such as
 `finance` must reach the resolver and produce the row-7 warning, not a 422. Unknown body fields are a 422.
 
+### D23. MCP SDK facts, from docs and installed source (M5)
+Researched 2026-09-20 from the package README (`mcp-2.2.0.dist-info/METADATA`), the v2 docs at
+py.sdk.modelcontextprotocol.io (servers/structured-output, servers/handling-errors, handlers/context, run/asgi,
+client/transports) and the installed source; not from memory. v2 is a breaking rework of v1 (`FastMCP` → `MCPServer`).
+- **Version**: `mcp==2.2.0` (current stable, v2 line, supports the 2026-07-28 spec). Requires `httpx2>=2.5.0`,
+  `starlette`, `uvicorn`, `pydantic>=2.12`, `sse-starlette`; installs cleanly next to our pins (`pip check`: ok).
+- **Server**: `from mcp.server import MCPServer`; `MCPServer(name, instructions=...)`; tools via
+  `@mcp.tool(description=...)` (`server/mcpserver/server.py:660`).
+- **Stdio**: `mcp.run("stdio")` (default transport) (`server.py:400-420`).
+- **Streamable HTTP**: `mcp.run("streamable-http", host=..., port=..., streamable_http_path="/mcp")`; default
+  `127.0.0.1:8000/mcp`. DNS-rebinding protection answers only localhost hosts unless `transport_security=` is set.
+- **Input schema**: generated from the parameter type hints; `Annotated[str, Field(description=...)]` puts a
+  description on each property.
+- **Structured output**: from the return annotation. `dict[str, ...]` stays unwrapped; scalars become
+  `{"result": ...}`. A tool may return `CallToolResult` itself; with `Annotated[CallToolResult, T]` the result is
+  validated against `T` **only when `is_error` is false** (`utilities/func_metadata.py:204-207`), and the SDK client
+  also validates structured content only for non-error results (`client/session.py:1101`).
+- **Errors**: `ToolError` (from `mcp.server.mcpserver.exceptions`) → `is_error=True` with the message as text and no
+  structured content; any other exception → generic "Error executing tool" and a server traceback; `MCPError` →
+  JSON-RPC protocol error.
+- **Request headers inside a tool**: add a parameter typed `Context` (`from mcp.server.mcpserver import Context`);
+  `ctx.headers` is the HTTP request's headers on Streamable HTTP and `None` on stdio (`server/mcpserver/context.py:282`).
+  The docs warn: "Headers are client-supplied input ... never an identity"; here the header is only *forwarded*, and
+  the API decides identity.
+- **Client**: `from mcp import Client`; `Client("http://.../mcp")`, `Client(StdioServerParameters(command, args, env))`
+  or `Client(mcp_server_instance)` (in-process). Custom HTTP headers go on an `httpx2.AsyncClient` passed to
+  `mcp.client.streamable_http.streamable_http_client(url, http_client=...)`. A stdio child inherits only an
+  allow-list of environment variables (`client/stdio.py:40`), so keys must be passed in `env=` explicitly.
+
+### D24. HTTP client: `httpx2`, and `httpx` is dropped (M5)
+Evidence, not memory: Starlette 1.6's `testclient.py:33-50` imports `httpx2` first and falls back to `httpx` with
+"Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead."; `mcp==2.2.0` itself requires
+`httpx2>=2.5.0`; `httpx2` (Pydantic-maintained continuation of HTTPX) has the same API. So `mcp_server/` uses
+`httpx2`, pinned in `requirements.txt` because it is imported directly, and `httpx` leaves `requirements-dev.txt`
+(tests only use Starlette's `TestClient`). No package is added that the SDK does not already bring.
+- Rejected: keeping `httpx` (a second HTTP client for the same job, and a deprecated path in Starlette).
+
+### D25. MCP server: a thin HTTP wrapper (M5)
+`mcp_server/server.py` never imports `app`; it calls the API over HTTP at `SEMANTIC_API_URL` (default
+`http://127.0.0.1:8000`) and sends `X-Via: mcp` on every call.
+- **Key forwarding**: on Streamable HTTP the key is the caller's own `X-API-Key` header and nothing else; if the
+  caller sent none, none is forwarded and the API answers 401. It never falls back to a server-side key, which would
+  give every unauthenticated HTTP caller that identity. On stdio (`ctx.headers is None`, one local user) the key
+  comes from `SEMANTIC_API_KEY`.
+- **Errors**: an API error envelope becomes `is_error=True` with `structured_content = {"http_status", "error"}`
+  (the API's own envelope) and the same JSON as text; an unreachable API becomes `is_error=True` with code
+  `api_unreachable`. No stack traces reach the model.
+- **Results**: the API's JSON is passed through unchanged (`authoritative_source`, `rule.text`, ... keep their API
+  names). `get_definition` makes two API calls (`GET /concepts/{id}` then `/relationships`, both audited) and adds
+  `incoming_relationships` to the concept.
+- Rejected: mounting the MCP server inside the FastAPI app (couples the wrapper to the service, and the brief wants
+  the MCP layer to be a client of the API); `ToolError` for API errors (text only, loses the structured envelope).
+
 ## Deviations from the brief
 - D1 fact dictionary and D2 `{fact:}` operand (both approved at DP1).
 - D6 extra validation rule (approved at DP1).
@@ -233,12 +297,15 @@ same rule applies to `context.system`/`context.domain` (1–64 chars). They are 
 - D13: a deprecated concept may lack a rule; evaluating it is `not_evaluable`.
 - D20: `as_of` added to `GET /concepts/{id}/relationships`; `status` filter excludes `draft`.
 - D16: `/health` requests are audited too ("one line per request").
+- D24: `httpx2` instead of the brief's `httpx` (evidence in D24).
+- D25: MCP results keep the API's field names (`authoritative_source`, `rule.text`) instead of renaming them to the
+  brief's `source`/`rule_text`; `evaluate_concept` already returns `source` and `rule_text` because the API does.
 - M0 creates only the directories it uses (`app/`, `tests/`); the other directories in §4 are created by the milestone
   that fills them, rather than as empty placeholders.
 
 ## Open questions
-- Starlette 1.6 warns that `httpx` is deprecated for `TestClient` and suggests `httpx2`. Kept `httpx` because the
-  brief names it and the MCP SDK (M5) depends on it; revisit if Starlette drops `httpx` support.
+- ~~`httpx` vs `httpx2`~~: resolved in M5 (D24): `httpx2`, `httpx` removed; the Starlette `httpx` warning is gone.
+  One warning remains, raised inside Starlette itself (`anyio.abc.BlockingPortal` alias); not ours to fix.
 - `currently_eligible_member` ignores `requested_date` ("eligible today" relies on a caller-supplied status
   snapshot). Documented, not changed.
 - ~~Dependency without an effective version~~: decided in M3, 422 `not_evaluable` (D18).
@@ -284,4 +351,6 @@ same rule applies to `context.system`/`context.domain` (1–64 chars). They are 
 - Why key comparison hashes first and loops over every key (`app/auth.py` `KeyStore.authenticate`).
 - Why evaluate checks access before facts (`app/main.py` `evaluate_concept`, `visible_concept`).
 - The resolver decision table and why `Resolution` cannot carry a restricted concept (`app/resolver.py` `resolve`).
+- How the MCP server picks the key to forward (header on HTTP, env on stdio, never a fallback) and why errors are
+  returned as `CallToolResult(is_error=True, structured_content=...)` instead of `ToolError` (`mcp_server/server.py` `_api_key`, `_error`).
 - Where comparison semantics live (`app/rules.py` `_COMPARE`, the only op table) and why null compares false.
