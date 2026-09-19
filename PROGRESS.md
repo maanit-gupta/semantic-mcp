@@ -257,6 +257,7 @@ same rule applies to `context.system`/`context.domain` (1–64 chars). They are 
 | M2 | `required_facts` ignores `{concept:}` | `test_dependency_facts_are_required_even_when_short_circuited` and others |
 | M2 | comparison with null returns `True` | `test_comparison_with_null_is_false[*]` |
 | M2 | `not_before` check disabled | `test_coverage_end_before_start_is_invalid`, `test_reporting_month_end_before_start_is_invalid` |
+| M4 audit | key comparison on the first digest byte only | survived at first → added `test_no_wrong_key_authenticates`, now killed |
 
 ## Developer must be able to explain
 - Why validation is split between `models.py` (shape) and `catalog.py` (cross-object), and how one pass collects all

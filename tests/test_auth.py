@@ -177,6 +177,16 @@ def test_keystore_authenticates_each_role_and_rejects_others():
     assert [store.authenticate(k) for k in (None, "", "key-a-00000000000", "key-a-0000000000000")] == [None] * 4
 
 
+def test_no_wrong_key_authenticates():
+    # Many deterministic wrong keys plus one-character near-misses of each real key: a weakened comparison (for
+    # example on a prefix of the digest) would accept some of them.
+    store = KeyStore([(role, role, key) for role, key in KEYS.items()])
+    near_misses = [key[:i] + chr(ord(key[i]) ^ 1) + key[i + 1:] for key in KEYS.values() for i in range(len(key))]
+    wrong = [f"wrong-key-{i:06d}-padding" for i in range(5000)] + near_misses + [k[:-1] for k in KEYS.values()]
+    assert [k for k in wrong if store.authenticate(k) is not None] == []
+    assert [store.authenticate(k).role for k in KEYS.values()] == list(KEYS)
+
+
 def write(tmp_path: Path, text: str) -> Path:
     path = tmp_path / "keys.yaml"
     path.write_text(text, encoding="utf-8")
