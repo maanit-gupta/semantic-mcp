@@ -14,7 +14,7 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
 | M4 Resolver + /resolve | done | `m4-done` |
 | M5 MCP server | done | `m5-done` |
 | M6 Tests, eval, demo | done | `m6-done` |
-| M7 Docs | done | `m7-done`, then `m7-fix1` (D29: eval and demo ran only with a key file) |
+| M7 Docs | done | `m7-done`; `m7-fix1` (D29: eval and demo ran only with a key file); `m7-fix2` (invalid-escape warning in two test literals); `m7-fix3` (this record) |
 
 ## DP1 (approved 2026-09-19, developer's "go" with all four default answers)
 
@@ -354,6 +354,9 @@ at startup and still refuses to start on a bad key file or catalog.
   that fills them, rather than as empty placeholders.
 
 ## Open questions
+- Final audit finding: a fresh venv showed 3 warnings on its first test run and 1 afterwards. Captured in a new venv:
+  two were `DeprecationWarning: invalid escape sequence '\u'` from bytes literals in `tests/test_api.py` (emitted only when
+  the file is first compiled); fixed in `m7-fix2` with raw bytes. The remaining one is inside Starlette (below).
 - ~~`httpx` vs `httpx2`~~: resolved in M5 (D24): `httpx2`, `httpx` removed; the Starlette `httpx` warning is gone.
   One warning remains, raised inside Starlette itself (`anyio.abc.BlockingPortal` alias); not ours to fix.
 - `currently_eligible_member` ignores `requested_date` ("eligible today" relies on a caller-supplied status
