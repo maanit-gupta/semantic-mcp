@@ -562,8 +562,8 @@ HOSTILE_RESOLVE = [
     (None, None, 422),
     (b"", "application/json", 422),
     (b"{not json", "application/json", 422),
-    (b'{"term": "\ud800"}', "application/json", 422),  # lone surrogate: Pydantic rejects it
-    (b'{"term": "a\ud83d\ude42"}', "application/json", 200),  # valid pair: rendered as ASCII escapes
+    (rb'{"term": "\ud800"}', "application/json", 422),  # lone surrogate: Pydantic rejects it
+    (rb'{"term": "a\ud83d\ude42"}', "application/json", 200),  # valid pair: rendered as ASCII escapes
     (b'{"term": "member"}', "text/plain", 422),
     (b'{"term": "member", "term": 5}', "application/json", 422),
     (b"\xff\xfe\x00", "application/json", 400),  # not UTF-8: FastAPI's parse error, enveloped
