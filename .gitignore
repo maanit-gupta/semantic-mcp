@@ -1,0 +1,15 @@
+# Virtualenvs and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local secrets and real key files (only config/api_keys.example.yaml is committed)
+.env
+config/api_keys.yaml
+
+# Audit logs
+*.jsonl
+audit/
