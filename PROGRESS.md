@@ -9,7 +9,7 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
 |---|---|---|
 | M0 Scaffold | done | `m0-done` |
 | M1 Models, catalog, validation | done | `m1-done` |
-| M2 Rule evaluator | not started | |
+| M2 Rule evaluator | done | `m2-done` |
 | M3–M7 | not started (later prompts) | |
 
 ## DP1 (approved 2026-09-19, developer's "go" with all four default answers)
@@ -113,9 +113,18 @@ No Python objects can be constructed from YAML tags (tested with a `!!python/obj
 | M1 | `effective_from > effective_to` → `>=` | `test_effective_from_equal_to_effective_to_is_valid` |
 | M1 | overlap `>=` → `>` | `test_approved_versions_must_not_overlap` |
 | M1 | report only the first Pydantic error per concept | survived at first → added `test_every_schema_error_within_one_concept_is_reported`, now killed |
+| M2 | `lte` → `operator.lt` | 6 tests, e.g. `test_active_member_boundaries[start0-None-True]` |
+| M2 | `gte` → `operator.gt` | 5 tests, e.g. `test_active_member_boundaries[start1-end1-True]` |
+| M2 | missing = `facts.get(name) is None` (null conflated with absent) | 8+ tests, e.g. `test_active_member_boundaries[start2-None-True]` |
+| M2 | `required_facts` ignores `{concept:}` | `test_dependency_facts_are_required_even_when_short_circuited` and others |
+| M2 | comparison with null returns `True` | `test_comparison_with_null_is_false[*]` |
+| M2 | `not_before` check disabled | `test_coverage_end_before_start_is_invalid`, `test_reporting_month_end_before_start_is_invalid` |
 
 ## Developer must be able to explain
 - Why validation is split between `models.py` (shape) and `catalog.py` (cross-object), and how one pass collects all
   issues (`app/catalog.py` `parse_catalog`).
 - Why `raw_ids` / `raw_fact_names` exist: they stop one schema error cascading into false "unknown target" errors.
 - How the callable discriminator picks an expression node type (`app/models.py` `_expr_tag`).
+- Why required facts are derived by walking the tree before evaluating, and why `name not in facts` (not
+  `facts.get(name) is None`) is the missing test (`app/rules.py` `required_facts`, `evaluate`).
+- Where comparison semantics live (`app/rules.py` `_COMPARE`, the only op table) and why null compares false.

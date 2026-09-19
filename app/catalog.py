@@ -18,18 +18,17 @@ import yaml
 from pydantic import ValidationError
 
 from .models import (
-    AllExpr,
-    AnyExpr,
+    NULL_OPS,
+    SNAKE_CASE,
     Comparison,
     Concept,
     ConceptRef,
     Expr,
     FactOperand,
     FactSpec,
-    NotExpr,
-    NULL_OPS,
     RefOperand,
-    SNAKE_CASE,
+    concept_refs,
+    walk,
 )
 
 # Which ops make sense for each fact type. Rejecting the rest at load means the evaluator never meets, say,
@@ -185,19 +184,6 @@ def _subject(concept: Concept) -> str:
     return f"concept '{concept.id}' v{concept.version}"
 
 
-def _walk(expr: Expr) -> Iterator[Expr]:
-    yield expr
-    if isinstance(expr, (AllExpr, AnyExpr)):
-        for child in expr.all if isinstance(expr, AllExpr) else expr.any:
-            yield from _walk(child)
-    elif isinstance(expr, NotExpr):
-        yield from _walk(expr.not_)
-
-
-def concept_refs(expr: Expr) -> set[str]:
-    return {node.concept for node in _walk(expr) if isinstance(node, ConceptRef)}
-
-
 def _cross_checks(
     facts: dict[str, FactSpec], raw_fact_names: set[Any], concepts: list[Concept], raw_ids: set[str]
 ) -> list[Issue]:
@@ -246,7 +232,7 @@ def _expression_issues(
     subject: str, expr: Expr, facts: dict[str, FactSpec], raw_fact_names: set[Any], known_ids: set[str]
 ) -> Iterator[Issue]:
     field = "rule.expression"
-    for node in _walk(expr):
+    for node in walk(expr):
         if isinstance(node, ConceptRef) and node.concept not in known_ids:
             yield Issue(subject, field, f"unknown concept '{node.concept}'")
         if not isinstance(node, Comparison):

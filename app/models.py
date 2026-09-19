@@ -7,7 +7,7 @@ file can be reported in one pass instead of stopping at the first failed model.
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Iterator, Literal, Union
 
 from pydantic import (
     BaseModel,
@@ -154,6 +154,20 @@ Expr = Annotated[
 AllExpr.model_rebuild()
 AnyExpr.model_rebuild()
 NotExpr.model_rebuild()
+
+
+def walk(expr: Expr) -> Iterator[Expr]:
+    """Every node of an expression tree, depth first. Static: nothing is evaluated."""
+    yield expr
+    if isinstance(expr, (AllExpr, AnyExpr)):
+        for child in expr.all if isinstance(expr, AllExpr) else expr.any:
+            yield from walk(child)
+    elif isinstance(expr, NotExpr):
+        yield from walk(expr.not_)
+
+
+def concept_refs(expr: Expr) -> set[str]:
+    return {node.concept for node in walk(expr) if isinstance(node, ConceptRef)}
 
 
 # --- Concepts ---------------------------------------------------------------------------------------------------
