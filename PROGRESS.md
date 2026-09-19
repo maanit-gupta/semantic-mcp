@@ -51,14 +51,13 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
 - **Audit log**: one process only (the lock does not coordinate several uvicorn workers); `GET /semantic/audit` reads
   the whole file to take its tail, fine for a demo, not for a large log. Fact values are never logged.
 - **Public docs**: `/docs`, `/redoc` and `/openapi.json` need no key; they describe the API, not the catalog.
-- **Audit log**: one process only (the lock does not coordinate several uvicorn workers); `GET /semantic/audit` reads
-  the whole file to take its tail, fine for a demo, not for a large log. Fact values are never logged.
-- **Public docs**: `/docs`, `/redoc` and `/openapi.json` need no key; they describe the API, not the catalog.
+- **Requests the HTTP server rejects are not audited**: uvicorn answers malformed requests (e.g. a bare LF inside a
+  header) with its own 400 before the app sees them.
 - **Term matching is exact after normalisation** (casefold, `_`/`-` as spaces, whitespace collapsed). No Unicode
   compatibility folding: full-width `ＭＥＭＢＥＲ` does not match `member` (`not_found`, no suggestion).
 - **Resolve's four outcomes are HTTP 200** (brief §6), including `not_found` and `restricted`; they are answers.
   The audit line still records `not_found` / `denied` for them.
-- **Default `as_of` is the UTC date.** A caller in a timezone behind UTC can get tomorrow's date around midnight;
+- **Default `as_of` is the UTC date.** Near midnight UTC it can be a day ahead of or behind the caller's local date;
   pass `as_of` explicitly when it matters.
 
 ## Decisions
@@ -160,7 +159,8 @@ Every path except `/health`, `/docs`, `/docs/oauth2-redirect`, `/redoc` and `/op
 the method is wrong. The middleware writes one audit line per request after the response, from `request.state`
 (caller, `audit_params`, `audit_outcome`, `error_code`) and `scope["route"].path` (the route template, set by
 FastAPI). **It never reads the request body**: routes put the allow-listed fields on `request.state.audit_params`,
-error handlers put the code on `request.state.error_code`. An exception escaping a route is caught there, audited as
+error handlers put the code on `request.state.error_code`. A request carrying more than one `X-API-Key` header is
+401 (found in the M4 adversarial pass: the app read the first while a proxy might read the last). An exception escaping a route is caught there, audited as
 `error`, and returned as the 500 envelope.
 - Rejected: a FastAPI dependency for auth (validation errors could be reported before the 401; unknown paths would
   404 without a key); reading the body in middleware (consumes the stream, and logs whatever the caller sent).
@@ -257,6 +257,19 @@ same rule applies to `context.system`/`context.domain` (1–64 chars). They are 
 | M2 | `required_facts` ignores `{concept:}` | `test_dependency_facts_are_required_even_when_short_circuited` and others |
 | M2 | comparison with null returns `True` | `test_comparison_with_null_is_false[*]` |
 | M2 | `not_before` check disabled | `test_coverage_end_before_start_is_invalid`, `test_reporting_month_end_before_start_is_invalid` |
+| M4 audit | resolver picks the first of several candidates | 13 tests, e.g. `test_resolve_ambiguous_response_shape` |
+| M4 audit | context mismatch falls back silently | 4 tests, e.g. `test_decision_table[solo-...-crm-...]` |
+| M4 audit | context narrowing ignores domain | 5 tests, e.g. `test_decision_table[widget-...-ops-...]` |
+| M4 audit | `effective_to` treated as exclusive | 8 tests, e.g. `test_get_selects_version_by_as_of[2025-12-31-1.0.0]` |
+| M4 audit | drafts become effective | 17 tests |
+| M4 audit | resolver ignores visibility | 25 tests |
+| M4 audit | `is_visible` always true | 49 tests |
+| M4 audit | 403 audited as `ok` | 3 tests, e.g. `test_denied_line` |
+| M4 audit | unauthenticated requests not audited | 4 tests, e.g. `test_unauthenticated_line` |
+| M4 audit | key comparison accepts any key | 59 tests |
+| M4 audit | `X-Via` copied into audit | 4 tests, e.g. `test_via_is_mapped_never_copied[MCP-api]` |
+| M4 audit | evaluate skips the 404/403 check | 6 tests |
+| M4 audit | first of several `X-API-Key` headers used | `test_several_key_headers_are_401[*]` |
 | M4 audit | key comparison on the first digest byte only | survived at first → added `test_no_wrong_key_authenticates`, now killed |
 
 ## Developer must be able to explain

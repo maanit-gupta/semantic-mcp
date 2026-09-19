@@ -91,6 +91,16 @@ def test_non_ascii_key_header_is_401_not_500(client, raw):
     assert (response.status_code, response.json()) == (401, UNAUTHENTICATED)
 
 
+@pytest.mark.parametrize(
+    "values",
+    [[KEYS["analyst"], KEYS["steward"]], [KEYS["steward"], KEYS["steward"]], ["wrong-key-0000000000", KEYS["steward"]]],
+    ids=["two-valid-keys", "same-key-twice", "wrong-then-valid"],
+)
+def test_several_key_headers_are_401(client, values):
+    response = client.get("/semantic/audit", headers=[("X-API-Key", v) for v in values])
+    assert (response.status_code, response.json()) == (401, UNAUTHENTICATED)
+
+
 def test_header_name_is_case_insensitive(client):
     assert client.get("/semantic/concepts", headers={"x-api-key": KEYS["analyst"]}).status_code == 200
 

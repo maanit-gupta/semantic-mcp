@@ -91,7 +91,9 @@ def create_app(
         if request.url.path in PUBLIC_PATHS:
             response = await call_next(request)
         else:
-            state.caller = keys.authenticate(request.headers.get(API_KEY_HEADER))
+            # Exactly one key header: with several, a proxy and this app could disagree about which one counts.
+            presented = request.headers.getlist(API_KEY_HEADER)
+            state.caller = keys.authenticate(presented[0]) if len(presented) == 1 else None
             if state.caller is None:
                 # Same body for a missing key, a wrong key, an unknown path or an invalid body: nothing is learned.
                 state.error_code = "unauthenticated"
