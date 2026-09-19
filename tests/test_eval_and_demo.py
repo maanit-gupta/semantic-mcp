@@ -112,3 +112,23 @@ def test_population_is_never_reachable_through_the_api():
     for path in (ROOT / "app").glob("*.py"):
         text = path.read_text(encoding="utf-8")
         assert "synthetic_people" not in text and "demo_conflict" not in text and "tests." not in text, path.name
+
+
+def test_every_eval_expectation_is_checked():
+    # One wrong expectation at a time: each must produce exactly its own failure message.
+    from evals.run import failures
+
+    observed = {"status": "resolved", "concepts": ["reporting_month_member"], "version": "2.0.0",
+                "suggestions": ["member"], "restricted_count": 1, "warnings": ["'x' is deprecated; use 'y' instead"]}
+    base = {"expected_status": "resolved", "expected_concepts": ["reporting_month_member"]}
+    assert failures(base, observed) == []
+    cases = [
+        ({"expected_status": "ambiguous"}, "status 'resolved' != 'ambiguous'"),
+        ({"expected_concepts": ["active_member"]}, "concepts ['reporting_month_member'] != ['active_member']"),
+        ({"expected_version": "1.0.0"}, "version '2.0.0' != '1.0.0'"),
+        ({"expected_suggestions": []}, "suggestions ['member'] != []"),
+        ({"expected_restricted_count": 0}, "restricted_count 1 != 0"),
+        ({"expected_warning": "matched none"}, "no warning containing 'matched none'"),
+    ]
+    for change, message in cases:
+        assert failures({**base, **change}, observed) == [message]
