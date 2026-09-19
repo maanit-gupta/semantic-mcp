@@ -13,7 +13,7 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
 | M3 API foundation | done | `m3-done` |
 | M4 Resolver + /resolve | done | `m4-done` |
 | M5 MCP server | done | `m5-done` |
-| M6 Tests, eval, demo | not started | |
+| M6 Tests, eval, demo | done | `m6-done` |
 | M7 Docs | not started | |
 
 ## DP1 (approved 2026-09-19, developer's "go" with all four default answers)
@@ -363,6 +363,53 @@ one-line reason. Nothing in the API can reach the fixture (`test_no_write_routes
 | M4 audit | first of several `X-API-Key` headers used | `test_several_key_headers_are_401[*]` |
 | M4 audit | key comparison on the first digest byte only | survived at first → added `test_no_wrong_key_authenticates`, now killed |
 
+## Coverage against brief §9 (M6 audit)
+| §9 requirement | Tests |
+|---|---|
+| Rules: active_member boundaries (start = req, end = req, end null, start after, end before) | `test_rules.py::test_active_member_boundaries` (6) |
+| Rules: every op and combinator | `test_every_op` (28), `test_combinators` (9), `test_fact_operand_compares_two_facts` |
+| Rules: missing vs null incl. short-circuit | `test_absent_end_date_is_missing`, `test_present_null_end_date_is_a_value`, `test_{all,any,not}_short_circuit_cannot_hide_missing_fact`, `test_dependency_facts_are_required_even_when_short_circuited` |
+| Rules: cycle detection; malformed expressions | `test_catalog.py::test_dependency_cycle_is_rejected`, `test_self_dependency_is_a_cycle`, `test_malformed_expression_is_rejected` (14), `test_expression_must_match_fact_dictionary` (13) |
+| Resolver: exact, alias, case/whitespace | `test_resolver.py::test_match_on_alias_id_and_name`, `test_normalisation_matches_id_name_and_alias` (6) |
+| Resolver: ambiguous, narrowed, context matches nothing | `test_member_without_context_is_ambiguous_with_exactly_five`, `test_member_narrowed_by_system` (7), `test_member_with_unknown_system_is_ambiguous_with_warning` |
+| Resolver: not_found + suggestion (`membr`) | `test_misspelling_suggests_member` |
+| Resolver: as_of version, deprecated warning, draft never, restricted, mixed | `test_as_of_selects_the_version`, `test_deprecated_resolves_with_warning`, `test_draft_never_becomes_a_candidate`, `test_eligible_for_follow_up_restricted_for_analyst_resolved_for_care_manager`, decision-table rows 4 and 6 |
+| Resolver: full decision table | `test_decision_table` (22 cells) + per-row warning/question tests |
+| API: every endpoint, every error code | `test_api.py` (health, list, get, relationships, evaluate, resolve), `test_audit.py` (audit endpoint); codes 400/401/403/404 (`not_found`, `not_effective`)/405/422 (`validation_error`, `insufficient_context`, `invalid_facts`, `not_evaluable`)/500 |
+| API: route-wide error envelope | `test_every_error_is_non_200_with_envelope` (33 cases) |
+| API: hostile inputs never 5xx | `test_hostile_resolve_inputs_never_5xx` (41), `test_hostile_query_and_path_inputs_never_5xx` (10), `test_hostile_evaluate_inputs_never_5xx` |
+| Auth: 401/403 matrix; restricted list entry; bad key config | `test_auth.py::test_role_by_endpoint_matrix` (24), `test_missing_or_invalid_key_is_401_everywhere` (48), `test_restricted_list_entry_exposes_no_definition`, `test_bad_key_file_fails_with_exact_issue_and_no_key_value` (9) |
+| Audit: success, denial, unauthenticated; no key; newline forging | `test_success_line`, `test_denied_line`, `test_unauthenticated_line`, `test_newlines_in_caller_input_cannot_forge_a_line`, `test_writer_escapes_line_separators` |
+| Audit: key-leak test (logs, audit, error bodies, OpenAPI) | `test_api_key_never_appears_in_logs_audit_errors_or_openapi`; MCP side `test_keys_never_appear_in_mcp_server_output_or_results` |
+| Catalog: each startup validation fails clearly on a bad fixture | `test_catalog.py` (77 tests, exact issue text) |
+| MCP: tools listed with descriptions; structured output; key forwarding | `test_mcp.py::test_exactly_three_tools_with_agent_guidance`, `test_resolve_member_is_ambiguous_with_five_candidates`, `test_env_key_is_forwarded` (4), `test_http_forwards_only_the_callers_own_key` (5) |
+| MCP: real protocol, stdio and HTTP | `test_stdio_subprocess_end_to_end`, `test_stdio_subprocess_without_key_is_unauthenticated`, `test_http_member_ambiguous_and_audited_via_mcp` |
+| Mutation check (6+ critical behaviours) | tables below (M1–M4 in Prompts 1–2; M5/M6 here) |
+| Eval: ≥ the ten cases, runnable, non-zero on failure; core cases via MCP | `test_eval_and_demo.py::test_eval_cases_cover_the_brief`, `test_eval_passes_and_runs_core_cases_through_mcp`, `test_eval_exits_non_zero_on_a_failing_case`, `test_every_eval_expectation_is_checked` |
+| Demo: seeded fixture, end ≥ start, every fact, differing counts, not via API | `test_fixture_is_deterministic_and_seeded`, `test_every_person_carries_every_fact_and_valid_coverage`, `test_demo_counts_differ_per_definition`, `test_demo_examples_are_explained_from_the_facts`, `test_demo_script_runs`, `test_population_is_never_reachable_through_the_api` |
+No §9 requirement is without a test.
+
+## Mutation checks, M5/M6 (committed code, clean `git status` before and after each)
+| Mutation | Killed by (first failing test) |
+|---|---|
+| HTTP falls back to the server's env key | `test_http_forwards_only_the_callers_own_key[no-key]` |
+| stdio ignores `SEMANTIC_API_KEY` | 17 tests, e.g. `test_eval_passes_and_runs_core_cases_through_mcp` |
+| HTTP forwards the first of several keys | `test_http_forwards_only_the_callers_own_key[two-keys]` |
+| key sent under the wrong header | 20 tests |
+| `X-Via` not sent / says `api` | `test_every_api_call_says_via_mcp` (3 tests each) |
+| API error returned with `is_error=False` | 15 tests, e.g. `test_restricted_definition_is_a_structured_error_without_content` |
+| error envelope dropped from the tool error | 16 tests |
+| non-200 JSON treated as success | 14 tests |
+| concept id not escaped | `test_concept_id_cannot_add_path_segments` |
+| `get_definition` omits incoming relationships | `test_get_definition_adds_incoming_relationships` |
+| eval runner never counts failures | `test_eval_exits_non_zero_on_a_failing_case` |
+| eval runner skips the MCP path | `test_eval_passes_and_runs_core_cases_through_mcp` |
+| eval ignores `expected_version` | survived at first → added `test_every_eval_expectation_is_checked`, now killed |
+| demo population changed (claims 0.6 → 0.7) | `test_demo_counts_differ_per_definition` |
+| demo counts people, not members | `test_demo_counts_differ_per_definition` |
+| demo evaluates on the wrong date | `test_demo_counts_differ_per_definition` |
+| resolver picks the first of several candidates | `python -m evals.run` exits 1 (14/16; case 1 fails on both paths) |
+
 ## Developer must be able to explain
 - Why validation is split between `models.py` (shape) and `catalog.py` (cross-object), and how one pass collects all
   issues (`app/catalog.py` `parse_catalog`).
@@ -377,4 +424,5 @@ one-line reason. Nothing in the API can reach the fixture (`test_no_write_routes
 - The resolver decision table and why `Resolution` cannot carry a restricted concept (`app/resolver.py` `resolve`).
 - How the MCP server picks the key to forward (header on HTTP, env on stdio, never a fallback) and why errors are
   returned as `CallToolResult(is_error=True, structured_content=...)` instead of `ToolError` (`mcp_server/server.py` `_api_key`, `_error`).
+- How the eval proves the MCP path without a running server or real keys (`evals/run.py` `_api_on_free_port`, `run_mcp`).
 - Where comparison semantics live (`app/rules.py` `_COMPARE`, the only op table) and why null compares false.
