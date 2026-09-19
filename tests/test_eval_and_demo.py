@@ -1,6 +1,7 @@
 """The eval runner and the demo script: exact outcomes, a failing eval exits non-zero, and the demo fixture is
 deterministic, complete and never reachable through the API.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,8 +18,24 @@ ROOT = Path(__file__).resolve().parent.parent
 CASES = ROOT / "evals" / "ambiguous_questions.yaml"
 
 
-def run_module(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, "-m", *args], cwd=ROOT, capture_output=True, text=True, timeout=180)
+def run_module(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, "-m", *args], cwd=ROOT, capture_output=True, text=True, timeout=180, env=env)
+
+
+def test_eval_and_demo_need_no_key_file(tmp_path):
+    # A fresh clone has no config/api_keys.yaml; the eval and the demo must still run (README says so).
+    env = {**os.environ, "SEMANTIC_API_KEYS_FILE": str(tmp_path / "absent.yaml")}
+    for module in ("evals.run", "scripts.demo_conflict"):
+        result = run_module(module, env=env)
+        assert result.returncode == 0, f"{module}: {result.stderr[-500:]}"
+
+
+def test_server_still_refuses_to_start_without_a_key_file(tmp_path):
+    # Building the ASGI app (what `uvicorn app.main:app` does) must still fail on a missing key file.
+    env = {**os.environ, "SEMANTIC_API_KEYS_FILE": str(tmp_path / "absent.yaml")}
+    code = "import app.main\ntry:\n    app.main.app\nexcept Exception as exc:\n    print(type(exc).__name__)"
+    result = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=60, env=env)
+    assert result.stdout.strip() == "KeyConfigError", result.stderr[-500:]
 
 
 # --- Eval -------------------------------------------------------------------------------------------------------

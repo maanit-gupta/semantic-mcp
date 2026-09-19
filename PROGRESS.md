@@ -14,7 +14,7 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
 | M4 Resolver + /resolve | done | `m4-done` |
 | M5 MCP server | done | `m5-done` |
 | M6 Tests, eval, demo | done | `m6-done` |
-| M7 Docs | done | `m7-done` |
+| M7 Docs | done | `m7-done`, then `m7-fix1` (D29: eval and demo ran only with a key file) |
 
 ## DP1 (approved 2026-09-19, developer's "go" with all four default answers)
 
@@ -67,6 +67,8 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
   serving it remotely needs `transport_security` settings, which are not configured here.
 - **MCP server logs**: `httpx2` logs each API request line (method, URL, status) at INFO to the MCP server's stderr.
   URLs carry concept ids and `as_of`, never keys (scanned in `test_keys_never_appear_in_mcp_server_output_or_results`).
+- **Importing `app.main` needs no key file** (D29); the app, and its key-file and catalog checks, are built when
+  `app.main.app` is first read, which `uvicorn app.main:app` does at startup.
 - **Default `as_of` is the UTC date.**
  Near midnight UTC it can be a day ahead of or behind the caller's local date;
   pass `as_of` explicitly when it matters.
@@ -324,6 +326,17 @@ line holds the named code. Commands use `python -m ...` throughout (`python -m u
 because running a script by path does not put the repository on `sys.path` (checked: `ModuleNotFoundError: No module named 'app'`).
 The production-gap section is based on the MCP specification revision 2026-07-28 (Authorization; Security Best
 Practices), read on 2026-09-20.
+
+### D29. The ASGI app is built on first access, not at import (M7 fix1)
+Found in the final audit: in a fresh clone without `config/api_keys.yaml`, `python -m evals.run` and
+`python -m scripts.demo_conflict` crashed with `KeyConfigError`, because `app/main.py` built `app = create_app()` at
+import time and both modules import `app.main` (the eval for `create_app`, the demo for `DEFAULT_CATALOG_PATH`). The
+README claimed the eval needs no key file; that claim had not been run in that exact situation. Fix: a module-level
+`__getattr__` (PEP 562) builds `app` the first time `app.main.app` is read. uvicorn resolves `app.main:app` with
+`importlib.import_module` then `getattr` (`uvicorn/importer.py`), so `uvicorn app.main:app` still builds the app
+at startup and still refuses to start on a bad key file or catalog.
+- Rejected: `uvicorn --factory app.main:create_app` (changes the documented run command); moving `create_app` to a new
+  module (layout change for the same effect).
 
 ## Deviations from the brief
 - D1 fact dictionary and D2 `{fact:}` operand (both approved at DP1).

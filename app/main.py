@@ -272,4 +272,16 @@ def create_app(
     return app
 
 
-app = create_app()
+_app: FastAPI | None = None
+
+
+def __getattr__(name: str) -> FastAPI:
+    # `uvicorn app.main:app` reads this attribute, so the server still builds (and validates) the app at startup and
+    # refuses to start on a bad key file or catalog. Importing the module alone (the eval runner, the demo, the
+    # tests) needs no key file.
+    global _app
+    if name != "app":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if _app is None:
+        _app = create_app()
+    return _app
