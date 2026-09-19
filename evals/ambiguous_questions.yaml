@@ -1,0 +1,135 @@
+# Ambiguous-question eval (brief §9). Every case pins as_of so the result does not change with the calendar.
+# expected_concepts: the resolved concept id, or the candidate ids in the documented order ((context.system, id)).
+# mcp: true marks the three core cases that are also run through the MCP resolve_term tool.
+
+cases:
+  - id: 1-member-no-context
+    question: "How many members do we have?"
+    term: member
+    role: analyst
+    as_of: 2026-09-20
+    expected_status: ambiguous
+    expected_concepts: [reporting_month_member, claimant_member, registered_member, currently_eligible_member, active_member]
+    expected_restricted_count: 0
+    mcp: true
+    rationale: Five approved meanings of "member" exist; with no context the service must ask, not choose.
+
+  - id: 2-member-enrollment
+    question: "How many members are enrolled today?"
+    term: member
+    context: {system: enrollment}
+    role: analyst
+    as_of: 2026-09-20
+    expected_status: resolved
+    expected_concepts: [active_member]
+    mcp: true
+    rationale: The enrollment context selects exactly one meaning.
+
+  - id: 3-member-crm
+    question: "How many members are in the CRM?"
+    term: member
+    context: {system: crm}
+    role: analyst
+    as_of: 2026-09-20
+    expected_status: resolved
+    expected_concepts: [registered_member]
+    rationale: In the CRM a member is anyone who registered.
+
+  - id: 4-member-customer-service
+    question: "Is the caller a member?"
+    term: member
+    context: {system: customer_service}
+    role: analyst
+    as_of: 2026-09-20
+    expected_status: resolved
+    expected_concepts: [currently_eligible_member]
+    rationale: Customer service means eligible today.
+
+  - id: 5-case-and-whitespace
+    question: "Define Active  Member."
+    term: "Active  Member"
+    role: analyst
+    as_of: 2026-09-20
+    expected_status: resolved
+    expected_concepts: [active_member]
+    rationale: Case and repeated whitespace are normalised before matching the concept name.
+
+  - id: 6-member-unknown-context
+    question: "How many members does finance report?"
+    term: member
+    context: {system: finance}
+    role: analyst
+    as_of: 2026-09-20
+    expected_status: ambiguous
+    expected_concepts: [reporting_month_member, claimant_member, registered_member, currently_eligible_member, active_member]
+    expected_warning: "matched none of the 5 meaning(s)"
+    rationale: A context that matches nothing must not fall back silently to a guess.
+
+  - id: 7a-follow-up-as-analyst
+    question: "Who is eligible for follow up?"
+    term: eligible for follow up
+    role: analyst
+    as_of: 2026-09-20
+    expected_status: restricted
+    expected_concepts: []
+    expected_restricted_count: 1
+    mcp: true
+    rationale: The concept is restricted to care managers and stewards; analysts learn only that it exists.
+
+  - id: 7b-follow-up-as-care-manager
+    question: "Who is eligible for follow up?"
+    term: eligible for follow up
+    role: care_manager
+    as_of: 2026-09-20
+    expected_status: resolved
+    expected_concepts: [eligible_for_follow_up]
+    rationale: Care managers may see the restricted concept.
+
+  - id: 8-misspelling
+    question: "How many membrs?"
+    term: membr
+    role: analyst
+    as_of: 2026-09-20
+    expected_status: not_found
+    expected_concepts: []
+    expected_suggestions: [member]
+    rationale: No exact match; a deterministic suggestion points to the right term.
+
+  - id: 9a-reporting-month-v1
+    question: "Reporting-month members for June 2025?"
+    term: reporting month member
+    role: analyst
+    as_of: 2025-06-15
+    expected_status: resolved
+    expected_concepts: [reporting_month_member]
+    expected_version: "1.0.0"
+    rationale: Before 2026 the first-day-of-month definition (v1) applies.
+
+  - id: 9b-reporting-month-v2
+    question: "Reporting-month members for June 2026?"
+    term: reporting month member
+    role: analyst
+    as_of: 2026-06-15
+    expected_status: resolved
+    expected_concepts: [reporting_month_member]
+    expected_version: "2.0.0"
+    rationale: From 2026 the any-portion-of-month definition (v2) applies.
+
+  - id: 10-draft
+    question: "How many engaged members?"
+    term: engaged member
+    role: steward
+    as_of: 2026-09-20
+    expected_status: not_found
+    expected_concepts: []
+    rationale: Drafts never resolve, not even for a steward.
+
+  - id: 11-deprecated
+    question: "How many covered lives?"
+    term: covered life
+    role: analyst
+    as_of: 2026-09-20
+    expected_status: resolved
+    expected_concepts: [covered_life]
+    expected_warning: "deprecated; use 'active_member' instead"
+    rationale: A deprecated concept still resolves, with a warning naming its replacement.

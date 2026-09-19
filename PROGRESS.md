@@ -290,6 +290,30 @@ Evidence, not memory: Starlette 1.6's `testclient.py:33-50` imports `httpx2` fir
 - Rejected: mounting the MCP server inside the FastAPI app (couples the wrapper to the service, and the brief wants
   the MCP layer to be a client of the API); `ToolError` for API errors (text only, loses the structured envelope).
 
+### D26. Eval runner (M6)
+`evals/ambiguous_questions.yaml` holds 13 cases (the brief's ten, with case 7 split by role, case 9 split by date,
+plus a deprecated-term case). Each case: `id`, `question`, `term`, `role`, `context`, `as_of` (pinned, so results do
+not change with the calendar), `expected_status`, `expected_concepts` (resolved → the one id; ambiguous → candidate
+ids in order), optional `expected_version`, `expected_suggestions`, `expected_restricted_count`,
+`expected_warning` (substring), `rationale`, and `mcp: true` for the three core cases (ambiguous "member",
+"member" narrowed to enrollment, restricted follow-up as analyst).
+`python -m evals.run` calls the pure resolver for every case, then runs the `mcp: true` cases through the real MCP
+tool path: it starts the API in-process on a free local port (uvicorn in a thread) with a throwaway key file of
+random keys and a throwaway audit file, and calls `resolve_term` through an in-process MCP client, which reaches the
+API over HTTP. It prints a pass/fail table and exits 1 on any failure.
+- Rejected: requiring a running API and `config/api_keys.yaml` for the eval (the eval must run from a fresh clone);
+  running every case through MCP (slower, and the resolver is the unit under test; three cases prove the path).
+
+### D27. Demo script and its fixture (M6)
+`tests/fixtures/synthetic_people.py` generates 50 synthetic people with `random.Random(seed)` (default seed
+20260920); every person carries every fact the five `member` rules need, and `coverage_end_date` is either null or
+not before `coverage_start_date`. `python -m scripts.demo_conflict` evaluates the five `member` definitions with
+`app.rules.evaluate` (the library, never the API) on 2026-09-15 for the September 2026 reporting month, prints the
+five counts side by side, then three people who are a member under one definition and not another, each with a
+one-line reason. Nothing in the API can reach the fixture (`test_no_write_routes_exist` pins the route list).
+- Rejected: a committed JSON population (the brief asks for a seeded generator; the generator is the reviewable
+  artefact); evaluating through the API (the API must never take a population).
+
 ## Deviations from the brief
 - D1 fact dictionary and D2 `{fact:}` operand (both approved at DP1).
 - D6 extra validation rule (approved at DP1).
