@@ -6,7 +6,8 @@ file can be reported in one pass instead of stopping at the first failed model.
 """
 from __future__ import annotations
 
-from datetime import date
+import re
+from datetime import date, datetime
 from typing import Annotated, Any, Iterator, Literal, Union
 
 from pydantic import (
@@ -14,10 +15,12 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    PlainValidator,
     StrictBool,
     StrictInt,
     StrictStr,
     Tag,
+    WithJsonSchema,
     model_validator,
 )
 
@@ -213,3 +216,39 @@ class Concept(_Strict):
     effective_to: date | None = None
     superseded_by: SnakeId | None = None
     allowed_roles: list[Role] = Field(min_length=1)
+
+
+# --- Dates from callers ------------------------------------------------------------------------------------------
+
+# [0-9], not \d: \d also matches non-ASCII digits. fromisoformat alone would accept "20260101" on 3.11.
+_ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+
+def parse_iso_date(value: Any) -> date:
+    """The one date rule for caller input (facts, as_of, requested_date). Raises ValueError, never TypeError."""
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and _ISO_DATE.fullmatch(value):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            pass  # e.g. 2026-02-30: right shape, not a real date
+    raise ValueError("expected a date as YYYY-MM-DD")
+
+
+# Pydantic's lax `date` would read an integer as a Unix timestamp; this accepts only the ISO string form.
+IsoDate = Annotated[date, PlainValidator(parse_iso_date), WithJsonSchema({"type": "string", "format": "date"})]
+
+
+# --- API request bodies ------------------------------------------------------------------------------------------
+
+
+class _Request(BaseModel):
+    # Unknown fields are a 422, so a body cannot smuggle in e.g. {"role": "steward"}.
+    model_config = ConfigDict(extra="forbid")
+
+
+class EvaluateRequest(_Request):
+    requested_date: IsoDate
+    # Values are type-checked by the evaluator against the fact dictionary; only the count is bounded here.
+    facts: Annotated[dict[str, Any], Field(max_length=100)]

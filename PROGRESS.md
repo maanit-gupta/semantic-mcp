@@ -10,7 +10,9 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
 | M0 Scaffold | done | `m0-done` |
 | M1 Models, catalog, validation | done | `m1-done` |
 | M2 Rule evaluator | done | `m2-done` |
-| M3–M7 | not started (later prompts) | |
+| M3 API foundation | done | `m3-done` |
+| M4 Resolver + /resolve | not started | |
+| M5–M7 | not started (later prompt) | |
 
 ## DP1 (approved 2026-09-19, developer's "go" with all four default answers)
 
@@ -18,6 +20,39 @@ Running log for the Ryan-MCP build. The spec is `BUILD_BRIEF.md`; this file reco
 2. A top-level fact dictionary in `concepts.yaml`, and a check that `depends_on` equals expression `{concept:}` refs.
 3. A comparison against `null` is `false` (SQL `WHERE` semantics); `eq`/`ne` with a `null` literal is rejected at load.
 4. Deprecated = `covered_life`; draft = `engaged_member` (term `member`); `reporting_month_member` v1 "first day of month" → v2 "any portion".
+
+## DP2 (approved 2026-09-20, with the developer's changes)
+
+1. Only the `existence` restricted-visibility policy is built. `is_visible(caller, concept)` in `app/auth.py` is the
+   only access predicate, and `RESTRICTED_VISIBILITY` is the single named setting.
+2. `GET /semantic/audit` is built: steward only, fixed file path (no path parameter), `limit` bounded 1–1000, and its
+   own access is audited like any request.
+3. A context that matches none of the candidates gives `ambiguous` plus a context warning (decision-table row 7). With
+   one remaining candidate the clarifying question names that meaning and asks whether it is the one needed.
+4. Drafts never appear through the API for any role: not listed, 404 on GET and evaluate, never resolved.
+5. Default `as_of` is **today's UTC date**, not server-local.
+6. The audit middleware never reads the request body. Routes put the known fields on `request.state.audit_params`
+   (and resolve sets `request.state.audit_outcome`); the middleware writes the line after the response.
+7. Evaluate returns `concept_id, result, rule_text, source, version, status, requested_date, warnings`.
+8. `GET /concepts/{id}/relationships` applies the same 404/403 checks to the concept itself as `GET /concepts/{id}`.
+9. `term` and `system` query parameters on `GET /concepts` are length-bounded.
+
+## Documented behaviours and limitations (feed docs/ASSUMPTIONS.md)
+
+- **Null comparisons are false.** Only `is_null`/`not_null` observe null, so `not (x == 3)` is **true** when `x` is null
+  (SQL `WHERE` semantics, D8). No seed rule negates a comparison on a nullable fact.
+- **Facts are caller-supplied.** The service holds no member data. Facts such as `currently_eligible_member`'s
+  `eligibility_status` come from the caller, who is responsible for them being current; "eligible today" therefore
+  means "the status the caller says holds today", and that concept does not look at `requested_date`.
+- **Restricted visibility is `existence` only.** Callers without the role see that a restricted concept exists (list
+  entry, `restricted_count` in resolve, 403 on GET/evaluate/relationships) but never its content. A `hidden` policy
+  (behave as if the concept did not exist) is a production option, not built.
+- **Drafts are invisible to every role.** Steward review of drafts through the API is a production concern.
+- **Audit log**: one process only (the lock does not coordinate several uvicorn workers); `GET /semantic/audit` reads
+  the whole file to take its tail, fine for a demo, not for a large log. Fact values are never logged.
+- **Public docs**: `/docs`, `/redoc` and `/openapi.json` need no key; they describe the API, not the catalog.
+- **Default `as_of` is the UTC date.** A caller in a timezone behind UTC can get tomorrow's date around midnight;
+  pass `as_of` explicitly when it matters.
 
 ## Decisions
 
@@ -127,4 +162,8 @@ No Python objects can be constructed from YAML tags (tested with a `!!python/obj
 - How the callable discriminator picks an expression node type (`app/models.py` `_expr_tag`).
 - Why required facts are derived by walking the tree before evaluating, and why `name not in facts` (not
   `facts.get(name) is None`) is the missing test (`app/rules.py` `required_facts`, `evaluate`).
+- Why auth sits in middleware before routing (same 401 for unknown path, bad body, wrong method) and how the audit
+  line is assembled from `request.state` without reading the body (`app/main.py` `authenticate_and_audit`).
+- Why key comparison hashes first and loops over every key (`app/auth.py` `KeyStore.authenticate`).
+- Why evaluate checks access before facts (`app/main.py` `evaluate_concept`, `visible_concept`).
 - Where comparison semantics live (`app/rules.py` `_COMPARE`, the only op table) and why null compares false.

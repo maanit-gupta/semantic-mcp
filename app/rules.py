@@ -8,9 +8,8 @@ Absent key = missing; a key present with null = a value. This is a pure library;
 from __future__ import annotations
 
 import operator
-import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from typing import Any, Callable, Mapping
 
 from .catalog import Catalog
@@ -25,6 +24,7 @@ from .models import (
     FactSpec,
     NotExpr,
     RefOperand,
+    parse_iso_date,
     walk,
 )
 
@@ -79,10 +79,6 @@ _COMPARE: dict[str, Callable[[Any, Any], bool]] = {
     "gte": operator.ge,
     "in": lambda left, right: left in right,
 }
-
-# [0-9], not \d: \d also matches non-ASCII digits, which date.fromisoformat would then reject or misread.
-_ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
-
 
 def rule_version(catalog: Catalog, concept_id: str, on: date) -> Concept:
     """The version of `concept_id` whose rule applies on `on`, or a typed error explaining why there is none."""
@@ -141,14 +137,7 @@ def _coerce(spec: FactSpec, raw: Any) -> Any:
             return None
         raise ValueError("must not be null")
     if spec.type == "date":
-        if isinstance(raw, date) and not isinstance(raw, datetime):
-            return raw
-        if isinstance(raw, str) and _ISO_DATE.fullmatch(raw):
-            try:
-                return date.fromisoformat(raw)
-            except ValueError:
-                pass  # e.g. 2024-02-30: right shape, not a real date
-        raise ValueError("expected a date as YYYY-MM-DD")
+        return parse_iso_date(raw)
     if spec.type == "integer":
         if isinstance(raw, int) and not isinstance(raw, bool):  # bool is an int subclass in Python
             return raw

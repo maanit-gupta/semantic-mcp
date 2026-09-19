@@ -1,0 +1,5 @@
+# Fake keys used only by the test suite.
+keys:
+  - {label: test-analyst, role: analyst, key: test-analyst-key-0001}
+  - {label: test-care-manager, role: care_manager, key: test-care-manager-key-0002}
+  - {label: test-steward, role: steward, key: test-steward-key-0003}

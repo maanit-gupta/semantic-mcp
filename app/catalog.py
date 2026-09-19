@@ -74,6 +74,16 @@ class Catalog:
         return None
 
 
+def normalize_term(text: str) -> str:
+    """Case-insensitive, `_`/`-` read as spaces, whitespace collapsed: "Active__Member " == "active member"."""
+    return " ".join(text.casefold().replace("_", " ").replace("-", " ").split())
+
+
+def term_keys(concept: Concept) -> set[str]:
+    """Every normalised form a caller may use to name this concept (brief §6 step 2)."""
+    return {normalize_term(text) for text in (concept.id, concept.name, concept.term, *concept.aliases)}
+
+
 def _covers(concept: Concept, on: date) -> bool:
     return concept.effective_from <= on and (concept.effective_to is None or on <= concept.effective_to)
 

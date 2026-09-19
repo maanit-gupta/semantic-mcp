@@ -33,6 +33,8 @@ Never break these. If the brief seems to require breaking one, stop and ask.
 - Tests use exact assertions (ids, statuses, counts, status codes), never `>= 1`. Every error path and every bug fix gets a test. Show that new tests can fail: break the code, watch the test fail, restore.
 - Never claim something works without running it. Paste real output.
 - Comments explain *why*, not *what*. Each module starts with 2–4 lines of design intent.
+- Never push to a remote unless the developer asks.
+- Run mutation checks only on committed code, and confirm `git status` is clean afterwards.
 - Before reporting the end of a prompt, **audit your own work as an independent reviewer would**: re-run everything from a clean state, verify each acceptance criterion with evidence you produced, scan for hard-rule violations and scope creep, and check that your claims in `PROGRESS.md` match the code.
 
 ## Environment

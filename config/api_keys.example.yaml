@@ -1,0 +1,13 @@
+# EXAMPLE ONLY: obviously fake keys for a local demo. Copy to config/api_keys.yaml (git-ignored) and replace the
+# values, or point SEMANTIC_API_KEYS_FILE at a file outside the repository. Keys must be at least 16 characters.
+# API keys are a demo stand-in for real identity; see docs/ASSUMPTIONS.md.
+keys:
+  - label: demo-analyst
+    role: analyst
+    key: FAKE-analyst-key-for-local-demo-only
+  - label: demo-care-manager
+    role: care_manager
+    key: FAKE-care-manager-key-for-local-demo-only
+  - label: demo-steward
+    role: steward
+    key: FAKE-steward-key-for-local-demo-only
